@@ -1,0 +1,10 @@
+.env
+runner/.env
+*.log
+.DS_Store
+docs
+# Data must live under DATA_ROOT outside the repo. These entries only catch
+# the case where someone points DATA_ROOT back into the working tree.
+data/
+pgdata/
+backups/

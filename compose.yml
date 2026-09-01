@@ -1,0 +1,151 @@
+# is-an.ai DNS infrastructure — single compose project, single network namespace.
+#
+# Deliberately ONE project. Splitting these services across compose projects
+# means joining them with `external: true` networks whose names derive from
+# directory names, which breaks silently when a directory is renamed.
+#
+# WARNING: `docker compose down` stops production DNS. For routine work use
+#   docker compose up -d <service>      /  docker compose restart <service>
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  pdns-auth:
+    build:
+      context: ./pdns
+    image: is-an-ai/pdns-auth:local
+    container_name: pdns-auth
+    depends_on:
+      pdns-db:
+        condition: service_healthy
+    ports:
+      # UDP/53 MUST stay published. HE's secondaries poll SOA over UDP on the
+      # zone's refresh timer (10800s); if that is blocked and HE does not fall
+      # back to TCP, nothing breaks until `expire` (604800s) elapses and HE
+      # stops serving the zone entirely — a silent, week-delayed outage.
+      #
+      # NS records cannot be used to reason about this: HE transfers from
+      # 216.218.133.2 / 2001:470:600::2, which appear in none of ns1-5.he.net.
+      # Restrict by SOURCE IP at the cloud security group instead: Docker's
+      # published ports cannot filter by source, and they bypass UFW/iptables
+      # INPUT (use the DOCKER-USER chain to filter on the host).
+      # Run tools/measure-inbound-53.sh for >4h before narrowing anything.
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "127.0.0.1:8081:8081"
+    # Only the four keys PowerDNS needs. Using `env_file: [.env]` would also
+    # inject the gatus password hash and the Slack webhook into this container.
+    environment:
+      PDNS_DB_NAME: ${PDNS_DB_NAME}
+      PDNS_DB_USER: ${PDNS_DB_USER}
+      PDNS_DB_PASSWORD: ${PDNS_DB_PASSWORD}
+      PDNS_API_KEY: ${PDNS_API_KEY}
+    networks: [data, ops]
+    mem_limit: 512m
+    cpus: 1.0
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "pdns_control ping | grep -q PONG"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  pdns-db:
+    image: ${POSTGRES_IMAGE:-postgres:17}
+    container_name: pdns-db
+    # No published ports: pdns-auth and backup reach it over the `data` network.
+    environment:
+      POSTGRES_DB: ${PDNS_DB_NAME}
+      POSTGRES_USER: ${PDNS_DB_USER}
+      POSTGRES_PASSWORD: ${PDNS_DB_PASSWORD}
+    volumes:
+      - ${DATA_ROOT:?DATA_ROOT must be set in .env}/pgdata:/var/lib/postgresql/data
+    networks: [data]
+    mem_limit: 1g
+    logging: *logging
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PDNS_DB_USER} -d ${PDNS_DB_NAME} -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  gatus:
+    image: ${GATUS_IMAGE:-twinproduction/gatus:latest}
+    container_name: gatus
+    depends_on: [pdns-auth]
+    ports:
+      # Localhost only. Reach it over an SSH tunnel:
+      #   ssh -L 8080:127.0.0.1:8080 <user>@<host>
+      - "127.0.0.1:8080:8080"
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      PDNS_API_KEY: ${PDNS_API_KEY}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+      GATUS_BASIC_USERNAME: ${GATUS_BASIC_USERNAME}
+      GATUS_BASIC_PASSWORD_BCRYPT: ${GATUS_BASIC_PASSWORD_BCRYPT}
+    volumes:
+      # Mounted at gatus's default config path. Do not set GATUS_CONFIG_FILE
+      # unless it names exactly this path: if it points anywhere else, gatus
+      # loads a different config and the security block below never applies.
+      - ./gatus/config.yaml:/config/config.yaml:ro
+    networks: [ops]
+    mem_limit: 256m
+    logging: *logging
+    restart: unless-stopped
+
+  github-runner:
+    build:
+      context: ./runner
+    image: is-an-ai/github-runner:local
+    container_name: github-runner
+    env_file: [runner/.env]
+    # _work stays in the container layer (no host bind mount). Recreating the
+    # container clears it, which is why no cleaner sidecar is needed.
+    networks: [ops]
+    mem_limit: 2g
+    cpus: 2
+    logging: *logging
+    healthcheck:
+      test: ["CMD", "test", "-f", "/home/runner/actions-runner/.runner"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: always
+
+  backup:
+    image: ${POSTGRES_IMAGE:-postgres:17}
+    container_name: pdns-backup
+    depends_on:
+      pdns-db:
+        condition: service_healthy
+    environment:
+      PGHOST: pdns-db
+      PGUSER: ${PDNS_DB_USER}
+      PGPASSWORD: ${PDNS_DB_PASSWORD}
+      PGDATABASE: ${PDNS_DB_NAME}
+      BACKUP_INTERVAL: ${BACKUP_INTERVAL:-86400}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+    volumes:
+      - ./backup/backup.sh:/backup.sh:ro
+      - ${DATA_ROOT:?DATA_ROOT must be set in .env}/backups:/backups
+    entrypoint: ["/bin/bash", "/backup.sh"]
+    networks: [data]
+    mem_limit: 256m
+    logging: *logging
+    restart: unless-stopped
+
+networks:
+  # pdns-db is reachable only from `data`, so the CI runner cannot touch
+  # PostgreSQL directly (it could on the old shared network).
+  data:
+    driver: bridge
+  ops:
+    driver: bridge

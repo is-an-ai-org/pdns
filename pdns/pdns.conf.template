@@ -1,0 +1,74 @@
+# Rendered to /etc/pdns/pdns.conf by entrypoint.sh (envsubst).
+# Only the four ${...} placeholders below are substituted; every other `$`
+# in this file is left alone.
+
+#############################################
+# Backend
+#############################################
+launch=gpgsql
+gpgsql-host=pdns-db
+gpgsql-port=5432
+gpgsql-dbname=${PDNS_DB_NAME}
+gpgsql-user=${PDNS_DB_USER}
+gpgsql-password=${PDNS_DB_PASSWORD}
+gpgsql-dnssec=yes
+
+#############################################
+# Hidden master
+#############################################
+# Zones delegate to ns1-5.he.net; this host appears in no NS record. Per-zone
+# TSIG (TSIG-ALLOW-AXFR / AXFR-MASTER-TSIG in domainmetadata) is what actually
+# authorises transfers — allow-axfr-ips is a second gate, not the only one.
+primary=yes
+allow-axfr-ips=216.218.133.2,2001:470:600::2
+allow-unsigned-notify=no
+also-notify=216.218.130.2
+
+#############################################
+# API / webserver
+#############################################
+api=yes
+api-key=${PDNS_API_KEY}
+webserver=yes
+webserver-address=0.0.0.0
+webserver-port=8081
+# Host publishes this on 127.0.0.1 only; this narrows it to the compose
+# networks so gatus/runner still reach it but nothing else can.
+webserver-allow-from=127.0.0.1,::1,172.16.0.0/12
+
+#############################################
+# Logging
+#############################################
+# 5 = notice. At 6 (info) PowerDNS emits two periodic messages that dominate
+# the log on an idle primary: "no primary or producer domains need
+# notifications" every xfr-cycle-interval (60s, so 1,440/day) and "gpgsql
+# Connection successful" every zone-cache-refresh-interval (300s, 288/day).
+# Neither carries information. 5 drops both and keeps AXFR/NOTIFY records,
+# which are the only operational signal a hidden master emits.
+# Do not use 4 (the upstream default): that drops the AXFR records too.
+loglevel=5
+
+# `normal` writes one line per API request. With a monitor polling this
+# endpoint that is thousands of identical 200s a day and nothing else.
+webserver-loglevel=none
+
+# Docker's json-file driver already stamps every line.
+log-timestamp=no
+
+#############################################
+# Misc
+#############################################
+# Must match --config-dir in entrypoint.sh. The upstream default is
+# /etc/powerdns; leaving it there while the file lives elsewhere makes
+# pdns_control look in the wrong place.
+config-dir=/etc/pdns
+dnssec-key-cache-ttl=30
+
+# Packet cache. NOT the upstream default, which is 20. AXFR responses are not
+# served from the packet cache, so this does nothing for the transfer path; it
+# only affects the SOA and other queries the secondaries send. Measure
+# packetcache-hit before changing it — this is on the HE-facing query path.
+#   curl -s -H "X-API-Key: $PDNS_API_KEY" \
+#     http://127.0.0.1:8081/api/v1/servers/localhost/statistics \
+#     | tr ',' '\n' | grep -A2 packetcache
+cache-ttl=300

@@ -1,0 +1,82 @@
+# Mounted read-only at /config/config.yaml, gatus's default config path.
+# GATUS_CONFIG_FILE is intentionally not set: if it names a path other than the
+# mount point, gatus loads a different config and the security block below is
+# silently skipped. Confirm with `curl -si http://127.0.0.1:8080/` — it must
+# answer 401, and verify.sh asserts that.
+
+security:
+  basic:
+    username: ${GATUS_BASIC_USERNAME}
+    password-bcrypt-base64: ${GATUS_BASIC_PASSWORD_BCRYPT}
+
+alerting:
+  slack:
+    webhook-url: ${SLACK_WEBHOOK_URL}
+
+endpoints:
+  # 30s x failure-threshold 3 = 90s detection. HE's secondaries serve from
+  # cache, so a few minutes of primary downtime is invisible to users; the
+  # polling only cost log volume. 120s x 2 = 4min is the right trade here.
+  - name: PDNS Internal API
+    group: Core
+    url: "http://pdns-auth:8081/api/v1/servers/localhost"
+    interval: 120s
+    conditions:
+      - "[STATUS] == 200"
+    headers:
+      X-API-Key: ${PDNS_API_KEY}
+    alerts:
+      - type: slack
+        failure-threshold: 2
+        success-threshold: 2
+        description: "PDNS Internal API failed"
+        send-on-resolved: true
+
+  - name: PDNS Query Test
+    group: Core
+    url: "pdns-auth"
+    interval: 120s
+    dns:
+      query-name: "www.is-an.ai"
+      query-type: "A"
+    conditions:
+      - "[DNS_RCODE] == NOERROR"
+    alerts:
+      - type: slack
+        failure-threshold: 2
+        success-threshold: 2
+        description: "PDNS query resolution failed"
+        send-on-resolved: true
+
+  # Continuous coverage of the end-to-end contract: the zone must actually be
+  # served by the public secondaries. verify.sh cannot cover this — it runs once
+  # at deploy time, and delegation breaks on its own schedule.
+  #
+  # Two nameservers on different HE prefixes (ns1 216.218.x, ns5 216.66.x) so a
+  # stall on one side of their infrastructure is visible.
+  - name: is-an.ai @ ns1.he.net
+    group: Delegation
+    url: "ns1.he.net"
+    interval: 300s
+    dns: { query-name: "is-an.ai", query-type: "SOA" }
+    conditions: ["[DNS_RCODE] == NOERROR"]
+    alerts:
+      - type: slack
+        failure-threshold: 2
+        success-threshold: 2
+        description: "ns1.he.net is not serving is-an.ai"
+        send-on-resolved: true
+
+  - name: is-an.ai @ ns5.he.net
+    group: Delegation
+    url: "ns5.he.net"
+    interval: 300s
+    dns: { query-name: "is-an.ai", query-type: "SOA" }
+    conditions: ["[DNS_RCODE] == NOERROR"]
+    alerts:
+      - type: slack
+        failure-threshold: 2
+        success-threshold: 2
+        description: "ns5.he.net is not serving is-an.ai"
+        send-on-resolved: true
+
