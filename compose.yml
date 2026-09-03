@@ -36,7 +36,17 @@ services:
       # Run tools/measure-inbound-53.sh for >4h before narrowing anything.
       - "53:53/tcp"
       - "53:53/udp"
-      - "127.0.0.1:8081:8081"
+      # API 발행 주소는 env 로 뺀다. 서버는 기본값 그대로, 로컬 검증만 다른 포트를 쓴다.
+      #
+      # 왜: 이 프로젝트는 운영 서버로 `ssh -L 8081:127.0.0.1:8081` 터널을 여는 게 일상이다.
+      # 터널이 먼저 바인딩한 상태에서 로컬 스택을 띄우면 `docker port` 는 발행 성공으로
+      # 보이지만 실제로 듣는 쪽은 ssh 다. 그러면 127.0.0.1:8081 로 보낸 API 호출이
+      # 전부 운영 PowerDNS 로 간다. 2026-09-03 에 실제로 그랬고, 운영에 같은 이름이
+      # CNAME 으로 실존해 쓰기가 거부된 덕에 사고가 안 났다.
+      #
+      # 이 포트는 사람이 들여다볼 때만 쓴다. 러너와 gatus 는 `ops` 네트워크에서
+      # http://pdns-auth:8081 로 직접 붙으므로 값을 바꿔도 영향이 없다.
+      - "${PDNS_API_BIND:-127.0.0.1:8081}:8081"
     # Only the four keys PowerDNS needs. Using `env_file: [.env]` would also
     # inject the gatus password hash and the Slack webhook into this container.
     environment:
@@ -49,7 +59,10 @@ services:
     cpus: 1.0
     logging: *logging
     healthcheck:
-      test: ["CMD-SHELL", "pdns_control ping | grep -q PONG"]
+      # `ping` 은 이 이미지의 pdns_control 에 없는 명령이다 -> Unknown command: 'PING'
+      # 그래서 컨테이너가 정상인데도 영원히 unhealthy 로 뜨고, 진짜 장애와 구분이 안 됐다.
+      # 올바른 이름은 rping (`pdns_control help` 참조).
+      test: ["CMD-SHELL", "pdns_control rping | grep -q PONG"]
       interval: 30s
       timeout: 5s
       retries: 5
