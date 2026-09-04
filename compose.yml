@@ -47,13 +47,20 @@ services:
       # 이 포트는 사람이 들여다볼 때만 쓴다. 러너와 gatus 는 `ops` 네트워크에서
       # http://pdns-auth:8081 로 직접 붙으므로 값을 바꿔도 영향이 없다.
       - "${PDNS_API_BIND:-127.0.0.1:8081}:8081"
-    # Only the four keys PowerDNS needs. Using `env_file: [.env]` would also
+    # Only the keys PowerDNS needs. Using `env_file: [.env]` would also
     # inject the gatus password hash and the Slack webhook into this container.
     environment:
       PDNS_DB_NAME: ${PDNS_DB_NAME}
       PDNS_DB_USER: ${PDNS_DB_USER}
       PDNS_DB_PASSWORD: ${PDNS_DB_PASSWORD}
       PDNS_API_KEY: ${PDNS_API_KEY}
+      # `-` not `:-`: an explicitly empty value in .env must survive, so a local
+      # verification run can stop NOTIFY from reaching the secondary. Unset =
+      # the real HE address, which is what the server has.
+      PDNS_ALSO_NOTIFY: ${PDNS_ALSO_NOTIFY-216.218.130.2}
+      # The bridge range differs by engine (Docker 172.16/12, OrbStack 192.168/16),
+      # and a request from outside it is dropped silently. Override locally.
+      PDNS_WEBSERVER_ALLOW_FROM: ${PDNS_WEBSERVER_ALLOW_FROM:-127.0.0.1,::1,172.16.0.0/12}
     networks: [data, ops]
     mem_limit: 512m
     cpus: 1.0
