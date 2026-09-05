@@ -1,5 +1,5 @@
 # Rendered to /etc/pdns/pdns.conf by entrypoint.sh (envsubst).
-# Only the four ${...} placeholders below are substituted; every other `$`
+# Only the ${...} placeholders below are substituted; every other `$`
 # in this file is left alone.
 
 #############################################
@@ -22,7 +22,11 @@ gpgsql-dnssec=yes
 primary=yes
 allow-axfr-ips=216.218.133.2,2001:470:600::2
 allow-unsigned-notify=no
-also-notify=216.218.130.2
+# The only outbound-initiating setting here. It is a placeholder so that a
+# local verification run can blank it (PDNS_ALSO_NOTIFY= in .env) instead of
+# firing NOTIFY packets at HE from a laptop. Unset falls back to the HE
+# address in compose.yml, so the server behaviour is unchanged.
+also-notify=${PDNS_ALSO_NOTIFY}
 
 #############################################
 # API / webserver
@@ -34,7 +38,11 @@ webserver-address=0.0.0.0
 webserver-port=8081
 # Host publishes this on 127.0.0.1 only; this narrows it to the compose
 # networks so gatus/runner still reach it but nothing else can.
-webserver-allow-from=127.0.0.1,::1,172.16.0.0/12
+# Placeholder because the compose bridge range is not the same everywhere:
+# Docker on Linux allocates from 172.17-172.31, but OrbStack on macOS uses
+# 192.168.x, and a request from outside the listed range is dropped with no
+# response and no log (webserver-loglevel=none). Default below is the server's.
+webserver-allow-from=${PDNS_WEBSERVER_ALLOW_FROM}
 
 #############################################
 # Logging

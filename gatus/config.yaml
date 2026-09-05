@@ -1,8 +1,11 @@
 # Mounted read-only at /config/config.yaml, gatus's default config path.
 # GATUS_CONFIG_FILE is intentionally not set: if it names a path other than the
 # mount point, gatus loads a different config and the security block below is
-# silently skipped. Confirm with `curl -si http://127.0.0.1:8080/` — it must
-# answer 401, and verify.sh asserts that.
+# silently skipped. Confirm with
+#   curl -si http://127.0.0.1:8080/api/v1/endpoints/statuses   -> 401
+# Not `/`: on gatus 5.x the static UI shell answers 200 and the basic-auth gate
+# sits on the data API behind it, so checking `/` reports 200 on a correctly
+# secured instance and proves nothing either way.
 
 security:
   basic:
