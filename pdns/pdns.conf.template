@@ -25,7 +25,7 @@ allow-unsigned-notify=no
 # The only outbound-initiating setting here. It is a placeholder so that a
 # local verification run can blank it (PDNS_ALSO_NOTIFY= in .env) instead of
 # firing NOTIFY packets at HE from a laptop. Unset falls back to the HE
-# address in compose.yml, so the server behaviour is unchanged.
+# transfer collector address in compose.yml.
 also-notify=${PDNS_ALSO_NOTIFY}
 
 #############################################
