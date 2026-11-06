@@ -10,7 +10,7 @@ set -eu
 # (that is how local verification stops NOTIFY from leaving the machine).
 # Only a genuinely unset variable gets the HE address. compose.yml normally
 # supplies it; this is the fallback for running the image on its own.
-: "${PDNS_ALSO_NOTIFY=216.218.130.2}"
+: "${PDNS_ALSO_NOTIFY=216.218.133.2}"
 export PDNS_ALSO_NOTIFY
 
 : "${PDNS_WEBSERVER_ALLOW_FROM:=127.0.0.1,::1,172.16.0.0/12}"
